@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase, getSession } from '../../../lib/supabase';
 import Input from '../../../components/ui/Input';
 import Button from '../../../components/ui/Button';
 import { Checkbox } from '../../../components/ui/Checkbox';
 import Icon from '../../../components/AppIcon';
+import ActivityIndicator from '../../../components/ui/ActivityIndicator';
 
 const SecuritySection = () => {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [sessions, setSessions] = useState([]);
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
@@ -19,33 +23,40 @@ const SecuritySection = () => {
     new: false,
     confirm: false
   });
+  const [error, setError] = useState('');
 
-  const activeSessions = [
-    {
-      id: 1,
-      device: 'MacBook Pro',
-      location: 'San Francisco, CA',
-      browser: 'Chrome 120',
-      lastActive: '2 minutes ago',
-      current: true
-    },
-    {
-      id: 2,
-      device: 'iPhone 15 Pro',
-      location: 'San Francisco, CA',
-      browser: 'Safari Mobile',
-      lastActive: '1 hour ago',
-      current: false
-    },
-    {
-      id: 3,
-      device: 'iPad Air',
-      location: 'Oakland, CA',
-      browser: 'Safari',
-      lastActive: '2 days ago',
-      current: false
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  const loadSessions = async () => {
+    try {
+      setLoading(true);
+      const session = await getSession();
+      if (!session) return;
+
+      // Load active sessions from Supabase Auth
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+
+      // In a real implementation, you'd fetch all sessions from auth.sessions
+      // For now, show current session
+      if (data.session) {
+        setSessions([{
+          id: 'current',
+          device: 'Current Device',
+          location: 'Unknown',
+          browser: navigator.userAgent.split(' ').pop(),
+          lastActive: 'Now',
+          current: true,
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const calculatePasswordStrength = (password) => {
     let strength = 0;
@@ -66,16 +77,61 @@ const SecuritySection = () => {
   };
 
   const handleSavePassword = async () => {
-    setIsSaving(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsSaving(false);
-    setIsChangingPassword(false);
-    setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    setPasswordStrength(0);
+    try {
+      setError('');
+
+      // Validate passwords
+      if (passwordData.newPassword.length < 8) {
+        setError('Password must be at least 8 characters');
+        return;
+      }
+
+      if (passwordData.newPassword !== passwordData.confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+
+      setIsSaving(true);
+
+      // Update password using Supabase Auth
+      const { error } = await supabase.auth.updateUser({
+        password: passwordData.newPassword
+      });
+
+      if (error) throw error;
+
+      alert('Password updated successfully');
+      setIsChangingPassword(false);
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setPasswordStrength(0);
+    } catch (error) {
+      console.error('Failed to update password:', error);
+      setError(error.message || 'Failed to update password. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleLogoutSession = (sessionId) => {
-    console.log('Logging out session:', sessionId);
+  const handleLogoutSession = async (sessionId) => {
+    try {
+      if (sessionId === 'current') {
+        await supabase.auth.signOut();
+        window.location.href = '/';
+      }
+    } catch (error) {
+      console.error('Failed to logout session:', error);
+    }
+  };
+
+  const handleLogoutAllSessions = async () => {
+    if (!confirm('Log out from all devices? You will need to log in again.')) return;
+
+    try {
+      await supabase.auth.signOut();
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Failed to logout all sessions:', error);
+    }
   };
 
   const getStrengthColor = () => {

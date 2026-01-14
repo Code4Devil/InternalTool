@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { signInWithOAuth, getSession, getUserPrimaryRole, upsertUserProfile, updateLastActivity } from '../../lib/supabase';
 import BrandingHeader from './components/BrandingHeader';
 import LoginForm from './components/LoginForm';
+import SignupForm from './components/SignupForm';
 import TwoFactorPanel from './components/TwoFactorPanel';
 import SystemHealthPanel from './components/SystemHealthPanel';
 import SessionWarning from './components/SessionWarning';
@@ -10,7 +12,7 @@ import Icon from '../../components/AppIcon';
 
 const AuthenticationLoginPortal = ({ onRoleChange }) => {
   const navigate = useNavigate();
-  const [authStep, setAuthStep] = useState('login');
+  const [authStep, setAuthStep] = useState('login'); // 'login', 'signup', or '2fa'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loginAttempts, setLoginAttempts] = useState(0);
@@ -19,6 +21,7 @@ const AuthenticationLoginPortal = ({ onRoleChange }) => {
   const [deviceInfo, setDeviceInfo] = useState('');
   const [ipAddress, setIpAddress] = useState('');
 
+  // Mock credentials for fallback authentication
   const mockCredentials = {
     admin: {
       username: 'admin',
@@ -35,6 +38,24 @@ const AuthenticationLoginPortal = ({ onRoleChange }) => {
   };
 
   useEffect(() => {
+    checkExistingSession();
+    setupDeviceInfo();
+  }, []);
+
+  const checkExistingSession = async () => {
+    try {
+      const session = await getSession();
+      if (session) {
+        // User is already logged in, redirect to appropriate dashboard
+        const primaryRole = await getUserPrimaryRole(session.user.id);
+        redirectBasedOnRole(primaryRole);
+      }
+    } catch (error) {
+      console.error('Session check error:', error);
+    }
+  };
+
+  const setupDeviceInfo = () => {
     const userAgent = navigator.userAgent;
     let device = 'Unknown Device';
     
@@ -47,8 +68,52 @@ const AuthenticationLoginPortal = ({ onRoleChange }) => {
     }
     
     setDeviceInfo(device);
-    setIpAddress('192.168.1.100');
-  }, []);
+    setIpAddress('192.168.1.100'); // In production, get from server
+  };
+
+  const redirectBasedOnRole = (role) => {
+    console.log('Redirecting based on role:', role);
+    updateLastActivity();
+    
+    if (role === 'owner' || role === 'admin') {
+      console.log('Redirecting to executive-dashboard');
+      onRoleChange('admin');
+      navigate('/executive-dashboard', { replace: true });
+    } else if (role === 'manager') {
+      console.log('Redirecting to executive-dashboard (manager)');
+      onRoleChange('admin'); // Managers also get admin view
+      navigate('/executive-dashboard', { replace: true });
+    } else {
+      console.log('Redirecting to member-focused-view');
+      onRoleChange('member');
+      navigate('/member-focused-view', { replace: true });
+    }
+  };
+
+  const handleOAuthLogin = async (provider) => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      // Log audit event for login attempt
+      await signInWithOAuth(provider);
+      // OAuth flow will redirect to callback page which handles role-based redirect
+    } catch (error) {
+      console.error('OAuth login error:', error);
+      setError(`Failed to authenticate with ${provider}. Please try again.`);
+      
+      // Track failed login attempt
+      setLoginAttempts(prev => prev + 1);
+      const remaining = 5 - (loginAttempts + 1);
+      setAttemptsRemaining(remaining);
+      
+      if (remaining <= 0) {
+        setError('Account temporarily locked due to multiple failed attempts. Please try again in 15 minutes.');
+      }
+      
+      setLoading(false);
+    }
+  };
 
   const handleLoginSubmit = (formData) => {
     setLoading(true);
@@ -136,6 +201,38 @@ const AuthenticationLoginPortal = ({ onRoleChange }) => {
     setError('Password reset functionality will be available soon. Please contact administrator.');
   };
 
+  const handleAuthSuccess = async (data) => {
+    try {
+      if (!data?.user) {
+        console.error('No user data in auth response');
+        setError('Authentication failed. Please try again.');
+        return;
+      }
+
+      // Ensure user profile exists
+      await upsertUserProfile(data.user.id, {
+        full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0],
+        avatar_url: data.user.user_metadata?.avatar_url || '',
+      });
+
+      // Get user's primary role from their project memberships
+      const primaryRole = await getUserPrimaryRole(data.user.id);
+      
+      console.log('User authenticated:', {
+        userId: data.user.id,
+        email: data.user.email,
+        role: primaryRole
+      });
+      
+      redirectBasedOnRole(primaryRole);
+    } catch (error) {
+      console.error('Error in handleAuthSuccess:', error);
+      // Default to member view if role cannot be determined
+      onRoleChange('member');
+      navigate('/member-focused-view');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4 md:p-6 lg:p-8">
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 lg:gap-12">
@@ -145,10 +242,19 @@ const AuthenticationLoginPortal = ({ onRoleChange }) => {
           <div className="space-y-4 md:space-y-5 lg:space-y-6">
             {authStep === 'login' ? (
               <LoginForm
-                onSubmit={handleLoginSubmit}
-                loading={loading}
-                error={error}
-                onForgotPassword={handleForgotPassword}
+                onSwitchToSignup={() => {
+                  setAuthStep('signup');
+                  setError('');
+                }}
+                onSuccess={handleAuthSuccess}
+              />
+            ) : authStep === 'signup' ? (
+              <SignupForm
+                onSwitchToLogin={() => {
+                  setAuthStep('login');
+                  setError('');
+                }}
+                onSuccess={handleAuthSuccess}
               />
             ) : (
               <TwoFactorPanel

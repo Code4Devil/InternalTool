@@ -1,16 +1,44 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { getUserPrimaryRole, getSession } from '../../lib/supabase';
 import Icon from '../AppIcon';
 
-const RoleBasedNavigation = ({ userRole = 'executive' }) => {
+const RoleBasedNavigation = ({ projectId = null }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [userRole, setUserRole] = useState('member');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadUserRole();
+  }, [projectId]);
+
+  const loadUserRole = async () => {
+    try {
+      const session = await getSession();
+      if (!session) {
+        setUserRole('member');
+        setLoading(false);
+        return;
+      }
+
+      const primaryRole = await getUserPrimaryRole(session.user.id);
+      setUserRole(primaryRole);
+    } catch (error) {
+      console.error('Failed to load user role:', error);
+      setUserRole('member');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const rolePermissions = {
-    executive: ['dashboard', 'tasks', 'communication', 'reports', 'settings'],
+    owner: ['dashboard', 'tasks', 'communication', 'reports', 'settings', 'audit'],
+    admin: ['dashboard', 'tasks', 'communication', 'reports', 'settings', 'audit'],
     manager: ['dashboard', 'tasks', 'communication', 'reports'],
     contributor: ['tasks', 'communication'],
-    guest: ['communication']
+    viewer: ['tasks', 'communication'],
+    member: ['tasks', 'communication']
   };
 
   const allNavigationItems = [
@@ -19,21 +47,21 @@ const RoleBasedNavigation = ({ userRole = 'executive' }) => {
       label: 'Dashboard',
       path: '/executive-dashboard',
       icon: 'LayoutDashboard',
-      requiredRole: 'executive'
+      requiredRole: 'manager'
     },
     {
       id: 'tasks',
       label: 'Tasks',
       path: '/task-management-center',
       icon: 'CheckSquare',
-      requiredRole: 'contributor'
+      requiredRole: 'viewer'
     },
     {
       id: 'communication',
       label: 'Communication',
       path: '/team-communication-hub',
       icon: 'MessageSquare',
-      requiredRole: 'guest'
+      requiredRole: 'viewer'
     },
     {
       id: 'reports',
@@ -43,11 +71,18 @@ const RoleBasedNavigation = ({ userRole = 'executive' }) => {
       requiredRole: 'manager'
     },
     {
+      id: 'audit',
+      label: 'Audit Log',
+      path: '/audit-log-activity-tracking',
+      icon: 'FileText',
+      requiredRole: 'admin'
+    },
+    {
       id: 'settings',
       label: 'Settings',
-      path: '/settings',
+      path: '/user-settings-profile',
       icon: 'Settings',
-      requiredRole: 'executive'
+      requiredRole: 'owner'
     }
   ];
 
@@ -67,13 +102,28 @@ const RoleBasedNavigation = ({ userRole = 'executive' }) => {
 
   const getRoleBadgeColor = () => {
     const colors = {
-      executive: 'bg-primary/10 text-primary',
+      owner: 'bg-primary/10 text-primary',
+      admin: 'bg-primary/10 text-primary',
       manager: 'bg-secondary/10 text-secondary',
       contributor: 'bg-success/10 text-success',
-      guest: 'bg-muted text-muted-foreground'
+      viewer: 'bg-muted text-muted-foreground',
+      member: 'bg-muted text-muted-foreground'
     };
-    return colors?.[userRole] || colors?.guest;
+    return colors?.[userRole] || colors?.member;
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-4 animate-pulse">
+        <div className="h-16 bg-muted/50 rounded-xl"></div>
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-12 bg-muted/30 rounded-lg"></div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

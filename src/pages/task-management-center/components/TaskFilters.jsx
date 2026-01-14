@@ -1,10 +1,128 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase, getSession } from '../../../lib/supabase';
 import Icon from '../../../components/AppIcon';
 import Select from '../../../components/ui/Select';
 import Input from '../../../components/ui/Input';
+import Button from '../../../components/ui/Button';
 
-const TaskFilters = ({ onFilterChange, activeFilters }) => {
+const TaskFilters = ({ onFilterChange, activeFilters, projectMembers = [] }) => {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [savedFilters, setSavedFilters] = useState([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [filterName, setFilterName] = useState('');
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  useEffect(() => {
+    loadSavedFilters();
+  }, []);
+
+  const loadSavedFilters = async () => {
+    try {
+      const session = await getSession();
+      if (!session) return;
+
+      setCurrentUserId(session.user.id);
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('preferences')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) throw error;
+
+      const savedPresets = data?.preferences?.savedFilters || [];
+      setSavedFilters(savedPresets);
+    } catch (error) {
+      console.error('Failed to load saved filters:', error);
+    }
+  };
+
+  const handleSaveFilter = async () => {
+    if (!filterName.trim()) return;
+
+    try {
+      const session = await getSession();
+      if (!session) return;
+
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('preferences')
+        .eq('id', session.user.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentPreferences = userData?.preferences || {};
+      const currentSavedFilters = currentPreferences.savedFilters || [];
+
+      const newFilter = {
+        id: Date.now().toString(),
+        name: filterName,
+        filters: activeFilters,
+        createdAt: new Date().toISOString(),
+      };
+
+      const updatedFilters = [...currentSavedFilters, newFilter];
+
+      const { error } = await supabase
+        .from('users')
+        .update({
+          preferences: {
+            ...currentPreferences,
+            savedFilters: updatedFilters,
+          },
+        })
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      setSavedFilters(updatedFilters);
+      setShowSaveModal(false);
+      setFilterName('');
+    } catch (error) {
+      console.error('Failed to save filter:', error);
+    }
+  };
+
+  const handleDeleteFilter = async (filterId) => {
+    try {
+      const session = await getSession();
+      if (!session) return;
+
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('preferences')
+        .eq('id', session.user.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentPreferences = userData?.preferences || {};
+      const currentSavedFilters = currentPreferences.savedFilters || [];
+      const updatedFilters = currentSavedFilters.filter(f => f.id !== filterId);
+
+      const { error } = await supabase
+        .from('users')
+        .update({
+          preferences: {
+            ...currentPreferences,
+            savedFilters: updatedFilters,
+          },
+        })
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      setSavedFilters(updatedFilters);
+    } catch (error) {
+      console.error('Failed to delete filter:', error);
+    }
+  };
+
+  const handleLoadFilter = (filter) => {
+    onFilterChange(filter.filters);
+  };
 
   const priorityOptions = [
     { value: 'all', label: 'All Priorities' },

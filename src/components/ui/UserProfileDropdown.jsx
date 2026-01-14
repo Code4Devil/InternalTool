@@ -1,16 +1,90 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getSession, signOut, getCurrentUserProfile, getUserPrimaryRole, upsertUserProfile } from '../../lib/supabase';
 import Icon from '../AppIcon';
 import Image from '../AppImage';
 
 const UserProfileDropdown = () => {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const userProfile = {
-    name: 'Sarah Mitchell',
-    email: 'sarah.mitchell@teamsync.com',
-    role: 'Executive Director',
-    avatar: '/assets/images/avatar-placeholder.png'
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      const session = await getSession();
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+
+      let profile = await getCurrentUserProfile();
+      
+      // If profile doesn't exist in our database, create it
+      if (!profile) {
+        console.log('User profile not found, creating...');
+        try {
+          await upsertUserProfile(session.user.id, {
+            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User',
+            avatar_url: session.user.user_metadata?.avatar_url || null,
+          });
+          // Fetch the newly created profile
+          profile = await getCurrentUserProfile();
+        } catch (createError) {
+          console.error('Failed to create user profile:', createError);
+        }
+      }
+
+      const role = await getUserPrimaryRole(session.user.id);
+      
+      setUserProfile({
+        name: profile?.full_name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User',
+        email: session.user.email || '',
+        role: role?.charAt(0).toUpperCase() + role?.slice(1) || 'Member',
+        avatar: profile?.avatar_url || '/assets/images/avatar-placeholder.png'
+      });
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+      // Still try to show some user data from session
+      try {
+        const session = await getSession();
+        if (session) {
+          setUserProfile({
+            name: session.user.email?.split('@')[0] || 'User',
+            email: session.user.email || '',
+            role: 'Member',
+            avatar: '/assets/images/avatar-placeholder.png'
+          });
+        }
+      } catch (e) {
+        setUserProfile({
+          name: 'User',
+          email: '',
+          role: 'Member',
+          avatar: '/assets/images/avatar-placeholder.png'
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      console.log('Signing out...');
+      await signOut();
+      setIsOpen(false);
+      navigate('/', { replace: true });
+    } catch (error) {
+      console.error('Sign out error:', error);
+      // Force navigation even if signout fails
+      navigate('/', { replace: true });
+    }
   };
 
   const menuItems = [
@@ -18,7 +92,7 @@ const UserProfileDropdown = () => {
       label: 'Profile Settings',
       icon: 'User',
       onClick: () => {
-        console.log('Navigate to profile settings');
+        navigate('/user-settings-profile');
         setIsOpen(false);
       }
     },
@@ -26,7 +100,7 @@ const UserProfileDropdown = () => {
       label: 'Account Preferences',
       icon: 'Settings',
       onClick: () => {
-        console.log('Navigate to account preferences');
+        navigate('/user-settings-profile');
         setIsOpen(false);
       }
     },
@@ -34,17 +108,14 @@ const UserProfileDropdown = () => {
       label: 'Help & Support',
       icon: 'HelpCircle',
       onClick: () => {
-        console.log('Navigate to help center');
+        window.open('https://help.example.com', '_blank');
         setIsOpen(false);
       }
     },
     {
       label: 'Sign Out',
       icon: 'LogOut',
-      onClick: () => {
-        console.log('User signed out');
-        setIsOpen(false);
-      },
+      onClick: handleSignOut,
       variant: 'destructive'
     }
   ];
@@ -73,6 +144,18 @@ const UserProfileDropdown = () => {
     };
   }, [isOpen]);
 
+  if (loading) {
+    return (
+      <div className="flex items-center gap-3 p-2 rounded-xl bg-muted animate-pulse">
+        <div className="w-10 h-10 rounded-lg bg-muted-foreground/20"></div>
+        <div className="hidden md:block space-y-2">
+          <div className="w-24 h-3 bg-muted-foreground/20 rounded"></div>
+          <div className="w-16 h-2 bg-muted-foreground/20 rounded"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
@@ -81,12 +164,16 @@ const UserProfileDropdown = () => {
         aria-label="User profile menu"
         aria-expanded={isOpen}
       >
-        <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted">
-          <Image
-            src={userProfile?.avatar}
-            alt={userProfile?.name}
-            className="w-full h-full object-cover"
-          />
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
+          {userProfile?.avatar && userProfile?.avatar !== '/assets/images/avatar-placeholder.png' ? (
+            <Image
+              src={userProfile?.avatar}
+              alt={userProfile?.name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <Icon name="User" size={20} className="text-muted-foreground" />
+          )}
         </div>
         <div className="hidden md:block text-left">
           <p className="text-sm font-medium text-foreground">{userProfile?.name}</p>

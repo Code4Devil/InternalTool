@@ -1,22 +1,58 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase, getSession, uploadAvatar } from '../../../lib/supabase';
 import Input from '../../../components/ui/Input';
 import Button from '../../../components/ui/Button';
 import Select from '../../../components/ui/Select';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
+import ActivityIndicator from '../../../components/ui/ActivityIndicator';
 
 const ProfileSection = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [originalData, setOriginalData] = useState(null);
   const [profileData, setProfileData] = useState({
-    name: 'Sarah Mitchell',
-    email: 'sarah.mitchell@teamsync.com',
-    department: 'Engineering',
-    role: 'Executive Director',
-    phone: '+1 (555) 123-4567',
-    location: 'San Francisco, CA',
-    avatar: '/assets/images/avatar-placeholder.png'
+    full_name: '',
+    email: '',
+    bio: '',
+    avatar_url: '',
   });
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      const session = await getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      setProfileData({
+        full_name: data?.full_name || '',
+        email: session.user.email || '', // Get email from session, not database
+        bio: data?.bio || '',
+        avatar_url: data?.avatar_url || '',
+      });
+      setOriginalData(data || {});
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+      setError('Failed to load profile');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const roleOptions = [
     { value: 'executive', label: 'Executive Director' },
@@ -33,28 +69,96 @@ const ProfileSection = () => {
   ];
 
   const handleSave = async () => {
-    setIsSaving(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsSaving(false);
-    setIsEditing(false);
+    try {
+      setIsSaving(true);
+      setError('');
+      const session = await getSession();
+      if (!session) return;
+
+      const { error } = await supabase
+        .from('users')
+        .update({
+          full_name: profileData.full_name,
+          bio: profileData.bio,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      setIsEditing(false);
+      setOriginalData(prev => ({ ...prev, ...profileData }));
+    } catch (error) {
+      console.error('Failed to save profile:', error);
+      setError('Failed to save profile. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCancel = () => {
     setIsEditing(false);
-    // Reset to original data
+    setProfileData({
+      full_name: originalData.full_name || '',
+      email: originalData.email || '',
+      bio: originalData.bio || '',
+      avatar_url: originalData.avatar_url || '',
+    });
   };
 
-  const handleImageUpload = (e) => {
+  const handleImageUpload = async (e) => {
     const file = e?.target?.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfileData({ ...profileData, avatar: reader?.result });
-      };
-      reader?.readAsDataURL(file);
+    if (!file) return;
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('File size must be less than 5MB');
+      return;
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setError('');
+      const session = await getSession();
+      if (!session) return;
+
+      // Upload to Supabase Storage
+      const avatarUrl = await uploadAvatar(session.user.id, file);
+
+      // Update user profile
+      const { error } = await supabase
+        .from('users')
+        .update({
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      setProfileData(prev => ({ ...prev, avatar_url: avatarUrl }));
+      setOriginalData(prev => ({ ...prev, avatar_url: avatarUrl }));
+    } catch (error) {
+      console.error('Failed to upload avatar:', error);
+      setError('Failed to upload avatar. Please try again.');
+    } finally {
+      setUploading(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <ActivityIndicator size="lg" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

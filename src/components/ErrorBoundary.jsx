@@ -1,52 +1,141 @@
 import React from "react";
 import Icon from "./AppIcon";
+import Button from "./ui/Button";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { 
+      hasError: false, 
+      error: null, 
+      errorInfo: null,
+      retryCount: 0,
+    };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true };
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
     error.__ErrorBoundary = true;
+    
+    // Log error to console in development
+    if (process.env.NODE_ENV === 'development') {
+      console.error("Error caught by ErrorBoundary:", error, errorInfo);
+    }
+
+    // Store error info for display
+    this.setState({ errorInfo });
+
+    // In production, you would log to an error tracking service
+    // Example: Sentry.captureException(error, { extra: errorInfo });
+    
     window.__COMPONENT_ERROR__?.(error, errorInfo);
-    // console.log("Error caught by ErrorBoundary:", error, errorInfo);
   }
+
+  handleRetry = () => {
+    this.setState(prevState => ({
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      retryCount: prevState.retryCount + 1,
+    }));
+  };
+
+  handleReload = () => {
+    window.location.reload();
+  };
+
+  handleGoHome = () => {
+    window.location.href = "/";
+  };
 
   render() {
     if (this.state?.hasError) {
+      const { error, errorInfo, retryCount } = this.state;
+      const showDetails = process.env.NODE_ENV === 'development';
+
       return (
-        <div className="min-h-screen flex items-center justify-center bg-neutral-50">
-          <div className="text-center p-8 max-w-md">
-            <div className="flex justify-center items-center mb-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="42px" height="42px" viewBox="0 0 32 33" fill="none">
-                <path d="M16 28.5C22.6274 28.5 28 23.1274 28 16.5C28 9.87258 22.6274 4.5 16 4.5C9.37258 4.5 4 9.87258 4 16.5C4 23.1274 9.37258 28.5 16 28.5Z" stroke="#343330" strokeWidth="2" strokeMiterlimit="10" />
-                <path d="M11.5 15.5C12.3284 15.5 13 14.8284 13 14C13 13.1716 12.3284 12.5 11.5 12.5C10.6716 12.5 10 13.1716 10 14C10 14.8284 10.6716 15.5 11.5 15.5Z" fill="#343330" />
-                <path d="M20.5 15.5C21.3284 15.5 22 14.8284 22 14C22 13.1716 21.3284 12.5 20.5 12.5C19.6716 12.5 19 13.1716 19 14C19 14.8284 19.6716 15.5 20.5 15.5Z" fill="#343330" />
-                <path d="M21 22.5C19.9625 20.7062 18.2213 19.5 16 19.5C13.7787 19.5 12.0375 20.7062 11 22.5" stroke="#343330" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+          <div className="max-w-2xl w-full bg-card rounded-2xl shadow-elevation-3 p-8">
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Icon name="AlertTriangle" size={40} className="text-error" />
+              </div>
+              <h1 className="text-3xl font-heading font-bold text-foreground mb-2">
+                Oops! Something went wrong
+              </h1>
+              <p className="text-muted-foreground text-lg">
+                We encountered an unexpected error. Please try again or contact support if the problem persists.
+              </p>
             </div>
-            <div className="flex flex-col gap-1 text-center">
-              <h1 className="text-2xl font-medium text-neutral-800">Something went wrong</h1>
-              <p className="text-neutral-600 text-base w w-8/12 mx-auto">We encountered an unexpected error while processing your request.</p>
-            </div>
-            <div className="flex justify-center items-center mt-6">
-              <button
-                onClick={() => {
-                  window.location.href = "/";
-                }}
-                className="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded flex items-center gap-2 transition-colors duration-200 shadow-sm"
+
+            {showDetails && error && (
+              <div className="mb-6 p-4 bg-muted rounded-lg">
+                <h3 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                  <Icon name="Info" size={16} />
+                  Error Details (Development Only)
+                </h3>
+                <div className="text-xs text-muted-foreground space-y-2">
+                  <div>
+                    <span className="font-medium">Error:</span>{' '}
+                    {error.toString()}
+                  </div>
+                  {errorInfo && errorInfo.componentStack && (
+                    <div>
+                      <span className="font-medium">Component Stack:</span>
+                      <pre className="mt-1 p-2 bg-background rounded text-xs overflow-x-auto">
+                        {errorInfo.componentStack}
+                      </pre>
+                    </div>
+                  )}
+                  {retryCount > 0 && (
+                    <div className="text-warning">
+                      Retry attempts: {retryCount}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button
+                variant="default"
+                onClick={this.handleRetry}
+                className="flex items-center gap-2"
               >
-                <Icon name="ArrowLeft" size={18} color="#fff" />
-                Back
-              </button>
+                <Icon name="RefreshCw" size={18} />
+                Try Again
+              </Button>
+              <Button
+                variant="outline"
+                onClick={this.handleReload}
+                className="flex items-center gap-2"
+              >
+                <Icon name="RotateCw" size={18} />
+                Reload Page
+              </Button>
+              <Button
+                variant="outline"
+                onClick={this.handleGoHome}
+                className="flex items-center gap-2"
+              >
+                <Icon name="Home" size={18} />
+                Go Home
+              </Button>
             </div>
-          </div >
-        </div >
+
+            <div className="mt-8 pt-6 border-t border-border text-center">
+              <p className="text-sm text-muted-foreground">
+                If this error continues, please contact support at{' '}
+                <a href="mailto:support@teamsync.com" className="text-primary hover:underline">
+                  support@teamsync.com
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
       );
     }
 

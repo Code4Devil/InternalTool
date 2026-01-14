@@ -4,54 +4,106 @@ import Input from '../../../components/ui/Input';
 import { Checkbox } from '../../../components/ui/Checkbox';
 import { supabase } from '../../../lib/supabase';
 
-function LoginForm({ onSwitchToSignup, onSuccess }) {
+function SignupForm({ onSwitchToLogin, onSuccess }) {
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const handleLogin = async (e) => {
+  const validatePassword = (pwd) => {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(pwd);
+    const hasLowerCase = /[a-z]/.test(pwd);
+    const hasNumbers = /\d/.test(pwd);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(pwd);
+
+    if (pwd.length < minLength) {
+      return 'Password must be at least 8 characters long';
+    }
+    if (!hasUpperCase || !hasLowerCase) {
+      return 'Password must contain both uppercase and lowercase letters';
+    }
+    if (!hasNumbers) {
+      return 'Password must contain at least one number';
+    }
+    if (!hasSpecialChar) {
+      return 'Password must contain at least one special character';
+    }
+    return null;
+  };
+
+  const handleSignup = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
+    // Validation
+    if (!fullName.trim()) {
+      setError('Please enter your full name');
+      setLoading(false);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
+      setLoading(false);
+      return;
+    }
+
+    if (!agreeToTerms) {
+      setError('Please agree to the Terms of Service and Privacy Policy');
+      setLoading(false);
+      return;
+    }
+
     try {
-      console.log('Attempting login with email:', email);
-      
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      // Sign up with Supabase Auth
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            full_name: fullName,
+          },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
       });
 
-      if (signInError) {
-        console.error('Sign in error:', signInError);
-        throw signInError;
-      }
+      if (signUpError) throw signUpError;
 
-      console.log('Login successful:', data);
-
-      if (data?.session) {
-        console.log('Session established, calling onSuccess');
-        if (onSuccess) {
-          await onSuccess(data);
-        } else {
-          console.warn('onSuccess callback is not defined');
+      // Check if email confirmation is required
+      if (data?.user && !data?.session) {
+        setError('');
+        alert('Success! Please check your email to confirm your account before signing in.');
+        if (onSwitchToLogin) {
+          onSwitchToLogin();
         }
-      } else {
-        console.warn('No session in login response');
-        setError('Login successful but no session created. Please try again.');
+      } else if (data?.session) {
+        // Auto-confirmed (if email confirmation is disabled)
+        if (onSuccess) {
+          onSuccess(data);
+        }
       }
     } catch (err) {
-      console.error('Login error:', err);
-      setError(err.message || 'Failed to sign in');
+      setError(err.message || 'Failed to create account');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOAuthLogin = async (provider) => {
+  const handleOAuthSignup = async (provider) => {
     setError('');
     try {
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -63,7 +115,7 @@ function LoginForm({ onSwitchToSignup, onSuccess }) {
 
       if (oauthError) throw oauthError;
     } catch (err) {
-      setError(err.message || `Failed to sign in with ${provider}`);
+      setError(err.message || `Failed to sign up with ${provider}`);
     }
   };
 
@@ -74,7 +126,7 @@ function LoginForm({ onSwitchToSignup, onSuccess }) {
         <Button
           variant="outline"
           className="w-full"
-          onClick={() => handleOAuthLogin('google')}
+          onClick={() => handleOAuthSignup('google')}
           disabled={loading}
         >
           <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
@@ -101,7 +153,7 @@ function LoginForm({ onSwitchToSignup, onSuccess }) {
         <Button
           variant="outline"
           className="w-full"
-          onClick={() => handleOAuthLogin('github')}
+          onClick={() => handleOAuthSignup('github')}
           disabled={loading}
         >
           <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
@@ -116,17 +168,32 @@ function LoginForm({ onSwitchToSignup, onSuccess }) {
           <div className="w-full border-t border-gray-300"></div>
         </div>
         <div className="relative flex justify-center text-sm">
-          <span className="px-2 bg-white text-gray-500">Or continue with</span>
+          <span className="px-2 bg-white text-gray-500">Or sign up with email</span>
         </div>
       </div>
 
-      {/* Login Form */}
-      <form onSubmit={handleLogin} className="space-y-4">
+      {/* Signup Form */}
+      <form onSubmit={handleSignup} className="space-y-4">
         {error && (
           <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md">
             {error}
           </div>
         )}
+
+        <div>
+          <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-1">
+            Full Name
+          </label>
+          <Input
+            id="fullName"
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Enter your full name"
+            required
+            disabled={loading}
+          />
+        </div>
 
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
@@ -153,7 +220,7 @@ function LoginForm({ onSwitchToSignup, onSuccess }) {
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder="Create a password"
               required
               disabled={loading}
             />
@@ -174,42 +241,80 @@ function LoginForm({ onSwitchToSignup, onSuccess }) {
               )}
             </button>
           </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Min 8 characters with uppercase, lowercase, number & special character
+          </p>
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Checkbox
-              id="remember"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
+        <div>
+          <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+            Confirm Password
+          </label>
+          <div className="relative">
+            <Input
+              id="confirmPassword"
+              type={showConfirmPassword ? 'text' : 'password'}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirm your password"
+              required
               disabled={loading}
             />
-            <label htmlFor="remember" className="ml-2 text-sm text-gray-600">
-              Remember me
-            </label>
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            >
+              {showConfirmPassword ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              )}
+            </button>
           </div>
-          <a href="#" className="text-sm text-blue-600 hover:text-blue-700">
-            Forgot password?
-          </a>
         </div>
 
-        <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? 'Signing in...' : 'Sign In'}
+        <div className="flex items-start">
+          <Checkbox
+            id="terms"
+            checked={agreeToTerms}
+            onChange={(e) => setAgreeToTerms(e.target.checked)}
+            disabled={loading}
+          />
+          <label htmlFor="terms" className="ml-2 text-sm text-gray-600">
+            I agree to the{' '}
+            <a href="#" className="text-blue-600 hover:text-blue-700">
+              Terms of Service
+            </a>{' '}
+            and{' '}
+            <a href="#" className="text-blue-600 hover:text-blue-700">
+              Privacy Policy
+            </a>
+          </label>
+        </div>
+
+        <Button type="submit" className="w-full" disabled={loading || !agreeToTerms}>
+          {loading ? 'Creating account...' : 'Create Account'}
         </Button>
       </form>
 
       <p className="text-center text-sm text-gray-600">
-        Don't have an account?{' '}
+        Already have an account?{' '}
         <button
-          onClick={onSwitchToSignup}
+          onClick={onSwitchToLogin}
           className="text-blue-600 hover:text-blue-700 font-medium"
           disabled={loading}
         >
-          Sign up
+          Sign in
         </button>
       </p>
     </div>
   );
 }
 
-export default LoginForm;
+export default SignupForm;

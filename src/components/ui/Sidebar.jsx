@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { getSession, signOut, getCurrentUserProfile, upsertUserProfile } from '../../lib/supabase';
 import Icon from '../AppIcon';
 import logo from '/logo/deltaxerolighthorizontallogo.png';
 
@@ -47,6 +48,12 @@ const adminNavItems = [
     ]
   },
   {
+    label: 'Audit Log',
+    path: '/audit-log-activity-tracking',
+    icon: 'FileText',
+    tooltip: 'Activity audit log'
+  },
+  {
     label: 'Settings',
     path: '/user-settings-profile',
     icon: 'Settings',
@@ -55,6 +62,12 @@ const adminNavItems = [
 ];
 
 const userNavItems = [
+  {
+    label: 'My Dashboard',
+    path: '/member-personal-dashboard',
+    icon: 'LayoutDashboard',
+    tooltip: 'My Personal Dashboard'
+  },
   {
     label: 'My View',
     path: '/member-focused-view',
@@ -92,12 +105,80 @@ const Sidebar = ({ isCollapsed = false, currentRole, onRoleChange }) => {
   const location = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
 
   const navigationItems = currentRole === 'admin' ? adminNavItems : userNavItems;
+
+  useEffect(() => {
+    loadUserProfile();
+  }, []);
+
+  const loadUserProfile = async () => {
+    try {
+      const session = await getSession();
+      if (!session) return;
+
+      let profile = await getCurrentUserProfile();
+      
+      // If profile doesn't exist in our database, create it
+      if (!profile) {
+        console.log('User profile not found, creating...');
+        try {
+          await upsertUserProfile(session.user.id, {
+            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User',
+            avatar_url: session.user.user_metadata?.avatar_url || null,
+          });
+          // Fetch the newly created profile
+          profile = await getCurrentUserProfile();
+        } catch (createError) {
+          console.error('Failed to create user profile:', createError);
+        }
+      }
+
+      // Set profile from database or fallback to session data
+      // Note: email comes from session since it's in auth.users, not public.users
+      setUserProfile({
+        ...(profile || {}),
+        full_name: profile?.full_name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User',
+        email: session.user.email,
+        avatar_url: profile?.avatar_url || session.user.user_metadata?.avatar_url || null
+      });
+    } catch (error) {
+      console.error('Failed to load user profile:', error);
+      // Set a default profile to avoid breaking the UI
+      try {
+        const session = await getSession();
+        if (session) {
+          setUserProfile({
+            full_name: session.user.email?.split('@')[0] || 'User',
+            email: session.user.email,
+            avatar_url: null
+          });
+        }
+      } catch (e) {
+        console.error('Failed to get session:', e);
+      }
+    }
+  };
 
   const handleNavigation = (path) => {
     navigate(path);
     setIsMobileOpen(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      console.log('Logging out...');
+      setIsProfileDropdownOpen(false);
+      await signOut();
+      console.log('Logout successful, redirecting to login...');
+      navigate('/', { replace: true });
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Force navigation even if signout fails
+      navigate('/', { replace: true });
+    }
   };
 
   const isActiveRoute = (path) => location.pathname === path;
@@ -186,30 +267,81 @@ const Sidebar = ({ isCollapsed = false, currentRole, onRoleChange }) => {
           </nav>
         </div>
 
-        <div className="mt-auto p-4 relative">
-          <button
-            onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-            className="w-full flex items-center justify-between p-3 bg-muted rounded-lg"
-          >
-            <span className="text-sm font-medium">{currentRole === 'admin' ? 'Admin' : 'User'} View</span>
-            <Icon name={isRoleDropdownOpen ? 'ChevronUp' : 'ChevronDown'} size={16} />
-          </button>
-          {isRoleDropdownOpen && (
-            <div className="absolute bottom-full mb-2 w-full bg-card border border-border rounded-lg shadow-lg">
+        <div className="mt-auto p-4 space-y-3">
+          {/* User Profile Section */}
+          {!isCollapsed && userProfile && (
+            <div className="relative">
               <button
-                onClick={() => handleRoleChange('admin')}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-muted"
+                onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                className="w-full flex items-center gap-3 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-smooth"
               >
-                Admin
+                <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                  {userProfile.avatar_url ? (
+                    <img src={userProfile.avatar_url} alt="Avatar" className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    <Icon name="User" size={20} color="var(--color-primary)" />
+                  )}
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {userProfile.full_name || 'User'}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {userProfile.email}
+                  </p>
+                </div>
+                <Icon name={isProfileDropdownOpen ? 'ChevronUp' : 'ChevronDown'} size={16} />
               </button>
-              <button
-                onClick={() => handleRoleChange('user')}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-muted"
-              >
-                Normal User
-              </button>
+              
+              {isProfileDropdownOpen && (
+                <div className="absolute bottom-full mb-2 w-full bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+                  <button
+                    onClick={() => {
+                      handleNavigation('/user-settings-profile');
+                      setIsProfileDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-3 text-sm hover:bg-muted flex items-center gap-2"
+                  >
+                    <Icon name="Settings" size={16} />
+                    Profile Settings
+                  </button>
+                  <div className="border-t border-border"></div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-3 text-sm hover:bg-muted flex items-center gap-2 text-error"
+                  >
+                    <Icon name="LogOut" size={16} />
+                    Log Out
+                  </button>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Role Switcher (Dev/Testing) */}
+          <button
+            onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
+            className="relative w-full flex items-center justify-between p-3 bg-muted/30 rounded-lg text-xs"
+          >
+            <span className="font-medium">{currentRole === 'admin' ? 'Admin' : 'User'} View</span>
+            <Icon name={isRoleDropdownOpen ? 'ChevronUp' : 'ChevronDown'} size={14} />
+            {isRoleDropdownOpen && (
+              <div className="absolute bottom-full mb-2 left-0 right-0 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+                <button
+                  onClick={() => handleRoleChange('admin')}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-muted"
+                >
+                  Admin
+                </button>
+                <button
+                  onClick={() => handleRoleChange('user')}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-muted"
+                >
+                  Normal User
+                </button>
+              </div>
+            )}
+          </button>
         </div>
       </aside>
       {isMobileOpen && (

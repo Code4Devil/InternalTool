@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase, getSession } from '../../../lib/supabase';
 import { Checkbox } from '../../../components/ui/Checkbox';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
+import ActivityIndicator from '../../../components/ui/ActivityIndicator';
 
 const NotificationPreferences = () => {
   const [isSaving, setIsSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [preferences, setPreferences] = useState({
     email: {
       taskAssignments: true,
@@ -32,6 +35,34 @@ const NotificationPreferences = () => {
     }
   });
 
+  useEffect(() => {
+    loadPreferences();
+  }, []);
+
+  const loadPreferences = async () => {
+    try {
+      setLoading(true);
+      const session = await getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('preferences')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) throw error;
+
+      if (data?.preferences?.notifications) {
+        setPreferences(data.preferences.notifications);
+      }
+    } catch (error) {
+      console.error('Failed to load notification preferences:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleToggle = (category, key) => {
     setPreferences({
       ...preferences,
@@ -54,10 +85,50 @@ const NotificationPreferences = () => {
   };
 
   const handleSave = async () => {
-    setIsSaving(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsSaving(false);
+    try {
+      setIsSaving(true);
+      const session = await getSession();
+      if (!session) return;
+
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('preferences')
+        .eq('id', session.user.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentPreferences = userData?.preferences || {};
+
+      const { error } = await supabase
+        .from('users')
+        .update({
+          preferences: {
+            ...currentPreferences,
+            notifications: preferences,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      alert('Notification preferences saved successfully');
+    } catch (error) {
+      console.error('Failed to save preferences:', error);
+      alert('Failed to save preferences. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <ActivityIndicator size="lg" />
+      </div>
+    );
+  }
 
   const notificationTypes = [
     { key: 'taskAssignments', label: 'Task Assignments', description: 'When you are assigned to a new task' },
